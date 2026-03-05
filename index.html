@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>PMA Code Generator v5</title>
+<title>PMA Code Generator v6</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -155,6 +155,31 @@ tr:hover td{background:rgba(91,141,238,.035);}
 .prog-bar{width:100%;height:3px;background:var(--brd);border-radius:2px;margin-top:12px;overflow:hidden;}
 .prog-fill{height:100%;background:linear-gradient(90deg,var(--acc),var(--pur));border-radius:2px;transition:width .4s;width:0%;}
 
+
+/* HISTORY MODAL */
+.hist-modal{position:fixed;inset:0;background:var(--bg);z-index:400;display:flex;flex-direction:column;overflow:hidden;}
+.hist-hdr{display:flex;align-items:center;gap:12px;padding:14px 24px;border-bottom:1px solid var(--brd);background:var(--s1);flex-shrink:0;}
+.hist-t{font-size:15px;font-weight:700;}
+.hist-sub{font-size:11px;color:var(--muted);font-family:var(--mono);}
+.hist-body{flex:1;overflow-y:auto;padding:20px 24px;}
+.hist-stats{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:16px;}
+.hist-cats{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;}
+.hcat{padding:4px 10px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid transparent;transition:all .15s;}
+.hcat:hover{opacity:.8;}
+.hcat.on{border-color:currentColor;}
+.hist-toolbar{display:flex;gap:7px;margin-bottom:10px;flex-wrap:wrap;align-items:center;}
+.hist-srch{position:relative;flex:1;min-width:180px;max-width:320px;}
+.hist-srch input{padding-left:30px;font-size:12px;}
+.hist-empty{padding:60px;text-align:center;color:var(--muted);}
+.hist-empty-ico{font-size:44px;margin-bottom:12px;}
+.hist-empty-t{font-size:15px;font-weight:700;margin-bottom:6px;}
+.hist-empty-s{font-size:12px;color:var(--dim);}
+.batch-tag{font-size:9px;background:var(--s3,#1e1e30);color:var(--muted);padding:2px 6px;border-radius:3px;font-family:var(--mono);}
+.date-col{font-size:10px;color:var(--muted);font-family:var(--mono);white-space:nowrap;}
+.del-btn{background:none;border:none;color:var(--dim);cursor:pointer;padding:2px 5px;font-size:12px;border-radius:3px;transition:color .15s;}
+.del-btn:hover{color:var(--red);}
+.seed-prog{margin-top:8px;font-size:11px;color:var(--grn);}
+
 .hidden{display:none!important;}
 ::-webkit-scrollbar{width:5px;height:5px;}
 ::-webkit-scrollbar-track{background:var(--bg);}
@@ -163,6 +188,51 @@ tr:hover td{background:rgba(91,141,238,.035);}
 </style>
 </head>
 <body>
+
+
+<!-- HISTORY MODAL -->
+<div class="hist-modal hidden" id="histModal">
+  <div class="hist-hdr">
+    <div>
+      <div class="hist-t">🗂 ประวัติ Database</div>
+      <div class="hist-sub" id="histSubTitle">โหลดข้อมูล...</div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button class="btn btn-ghost btn-sm" onclick="seedFromDB()" id="btnSeed">📥 นำเข้าจาก PMA_2025</button>
+      <button class="btn btn-o btn-sm" onclick="exportHistory()">⬇ Export ประวัติ</button>
+      <button class="btn btn-ghost btn-sm" onclick="confirmClearHistory()" style="color:var(--red)">🗑 ล้างประวัติ</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeHistory()">✕ ปิด</button>
+    </div>
+  </div>
+  <div class="hist-body">
+    <div id="histAlertArea"></div>
+    <div class="hist-stats" id="histStats"></div>
+    <div class="hist-cats" id="histCats"></div>
+    <div class="hist-toolbar">
+      <div class="hist-srch">
+        <span class="srch-ico">🔍</span>
+        <input type="text" id="histSrch" placeholder="ค้นหา รหัสเก่า, รหัสใหม่, ชื่อ..." oninput="renderHistory()">
+      </div>
+      <select id="histSort" onchange="renderHistory()" style="width:auto;min-width:140px">
+        <option value="date_desc">ล่าสุดก่อน</option>
+        <option value="date_asc">เก่าก่อน</option>
+        <option value="pcode">หมวดสินค้า</option>
+        <option value="newCode">รหัสใหม่</option>
+      </select>
+      <span class="rcnt" id="histRcnt"></span>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>#</th><th>หมวด</th><th>รหัสเก่า</th><th>ชื่อเก่า</th>
+          <th>รหัสใหม่</th><th>ชื่อใหม่</th><th>วันที่เพิ่ม</th><th>Batch</th><th></th>
+        </tr></thead>
+        <tbody id="histTbody"></tbody>
+      </table>
+    </div>
+    <div id="histMore" class="more-msg hidden"></div>
+  </div>
+</div>
 
 <!-- OVERLAY -->
 <div class="ov hidden" id="ov">
@@ -237,13 +307,14 @@ tr:hover td{background:rgba(91,141,238,.035);}
   <div class="logo-mark">GA</div>
   <div>
     <div class="logo-t">PMA Code Generator</div>
-    <div class="logo-s">v5 · Auto-Detect · No-Duplicate · Google Sheets / SharePoint</div>
+    <div class="logo-s">v6 · Auto-Detect · Built-in Database · History</div>
   </div>
   <div class="hdr-r" id="hdrR">
     <span class="vtag" id="dbTag">DB: Static</span>
     <button class="btn btn-ghost btn-sm" id="btnReset" onclick="resetImport()" style="display:none">↩ นำเข้าใหม่</button>
     <button class="btn btn-o btn-sm" id="btnWB" onclick="openWBModal()" style="display:none">↑ อัพเดท PMA_2025</button>
     <button class="btn btn-g btn-sm" id="btnExport" onclick="doExport()" style="display:none">⬇ Export Excel</button>
+    <button class="btn btn-ghost btn-sm" id="btnHistory" onclick="openHistory()">🗂 ประวัติ DB</button>
   </div>
 </header>
 
@@ -391,12 +462,30 @@ function hasBeauty(s){
 function detectPcode(name){
   const s=String(name||'').trim();
   const sl=s.toLowerCase();
-  // ── PROMOTION keyword anywhere in name → P08 (catches PRO50VI PROMOTION / PMA50)
+  // ── PROMOTION keyword anywhere in name → P08
   if(/\bPROMOTION\b/i.test(s)) return 'P08';
   // ── Text-prefix rules
   if(/^THEME/i.test(s)) return 'P11';
   if(/^SME/i.test(s)) return 'P11';
-  if(/^SV/i.test(s)) return 'P11';
+  // ── SV prefix — granular rules based on actual PMA_2025 data
+  if(/^SV/i.test(s)){
+    // SV24 / SVC24 → P05 (24 Shopping / แคตตาล็อก)
+    if(/^SV24|^SVC24/i.test(s)) return 'P05';
+    // keyword 24 Shopping / แคตตาล็อก → P05
+    if(/24\s*shopping|แคตตาล็อก|แคดตาล็อก/i.test(s)) return 'P05';
+    // SVP, SVN, SVEN → P02 (Process Food)
+    if(/^SVP|^SVN|^SVEN/i.test(s)) return 'P02';
+    // SVEU, SVML → P11 (ของฝาก นักท่องเที่ยว) — must check before SVE
+    if(/^SVEU|^SVML/i.test(s)) return 'P11';
+    // SVE → P06 (สุขภาพ) or P03 (ครัวเรือน)
+    if(/^SVE/i.test(s)) return /ยา|เวชภัณฑ์|สุขภาพ|14,53/.test(s)?'P06':'P03';
+    // SVC(ไม่ใช่ SVC24) → P11 (Seasonal/ของฝาก)
+    if(/^SVC/i.test(s)) return 'P11';
+    // SV(digit-digit) → P11
+    if(/^SV\(\d/.test(s)) return 'P11';
+    // generic SV → P11
+    return 'P11';
+  }
   if(/^EGGS/i.test(s)) return 'P02';
   if(/^(BSTA|PBSTA|STA)\d|^52[NH]/i.test(s)) return 'P09';
   if(/^V[\s\(\-]|^VIH|^V$/i.test(s)) return 'P12';
@@ -512,7 +601,7 @@ function processDBWB(wb){
   setDBSt('ok',`✅ โหลดแล้ว — ${cnt.toLocaleString()} รหัสเก่า · ${wb.SheetNames.length} Sheet`);
   document.getElementById('dbTag').textContent=`DB: ${cnt.toLocaleString()} รหัส`;
   addAlert('ok',`✅ โหลด Database สำเร็จ — ${cnt.toLocaleString()} รหัสเก่า จาก ${wb.SheetNames.length} Sheet`);
-  if(Object.keys(rawData).length>0) reprocess();
+  if(Object.keys(rawData).length>0) reprocess().then(()=>{ if(Object.keys(allData).length>0) renderAll(); });
 }
 function loadDBFile(e){const f=e.target.files[0];if(!f)return;showOv('กำลังอ่านไฟล์ DB...','');const r=new FileReader();r.onload=ev=>{try{processDBWB(XLSX.read(ev.target.result,{type:'binary'}));hideOv();}catch(ex){hideOv();alert('อ่านไฟล์ไม่ได้: '+ex.message);}};r.readAsBinaryString(f);}
 function loadGSheets(){
@@ -546,38 +635,89 @@ function loadImport(e){
   showOv('กำลังอ่านไฟล์...','');
   setTimeout(()=>{
     const r=new FileReader();
-    r.onload=ev=>{
+    r.onload=async ev=>{
       try{
         const wb=XLSX.read(ev.target.result,{type:'binary'});
         rawData={};
         for(const sn of wb.SheetNames){
           const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:''});
-          let s=0;if(rows.length>0){const fc=String(rows[0][0]||'').trim();if(fc==='รหัสเก่า'||/code/i.test(fc))s=1;}
+          // Find first data row: skip header rows (where col A is not an old code format)
+          let s=0;
+          for(let ri=0;ri<Math.min(5,rows.length);ri++){
+            const fc=String(rows[ri][0]||'').trim();
+            // Stop when we find a row that looks like a real old code (GA prefix or similar)
+            if(/^GA[0-9RX]/i.test(fc)||/^G0[0-9]/i.test(fc)) break;
+            // Skip header/label rows
+            if(!fc||/^(รหัสเก่า|old.?code|code|รหัส|no\.|#)/i.test(fc)||fc.length>30) s=ri+1;
+          }
           rawData[sn]=rows.slice(s);
         }
-        reprocess();hideOv();showResults();
+        await reprocess();hideOv();showResults();
       }catch(ex){hideOv();alert('อ่านไฟล์ไม่ได้: '+ex.message);}
     };
     r.readAsBinaryString(f);
   },50);
 }
-function reprocess(){
-  resetCounters();allData={};
+// idbLookup: {oldCode → {newCode, newName, pcode}} built fresh before each reprocess
+let idbLookup = {};
+
+async function reprocess(){
+  // ① Load ALL IndexedDB records → build idbLookup + running counters
+  stdC={...S_STD}; p08C={...S_P08};
+  idbLookup={};
+  try{
+    const records = await dbGetAll();
+    for(const r of records){
+      // Build idbLookup for duplicate detection
+      if(r.oldCode) idbLookup[r.oldCode] = r;
+      // Build max running counters from DB
+      const nc = r.newCode||'';
+      if(nc.length===20&&nc.startsWith('G')){
+        if(nc.includes('P08PR')){
+          const k=nc.slice(0,16); const v=parseInt(nc.slice(16))||0;
+          if(!p08C[k]||v>p08C[k]) p08C[k]=v;
+        } else {
+          const k=nc.slice(0,17); const v=parseInt(nc.slice(17))||0;
+          if(!stdC[k]||v>stdC[k]) stdC[k]=v;
+        }
+      }
+    }
+  }catch(e){ console.warn('reprocess DB load error:',e); }
+  // ② Merge counters from loaded Excel/GSheets DB (oldLookup from processDBWB)
+  // Already merged in processDBWB → stdC/p08C
+  allData={};
   for(const sn of Object.keys(rawData)) allData[sn]=processRows(rawData[sn]);
 }
+
 function processRows(rows){
   const res=[];
   for(let i=0;i<rows.length;i++){
     const row=rows[i];
     const oc=String(row[0]||'').trim(), on=String(row[1]||'').trim();
     if(!oc||/^(รหัสเก่า|nan|undefined|null)$/i.test(oc)) continue;
-    // Duplicate check against DB
+    // ── Priority 1: Check IndexedDB (source of truth)
+    if(idbLookup[oc]){
+      const ex=idbLookup[oc];
+      const validNC=ex.newCode&&ex.newCode.length===20&&ex.newCode.startsWith('G');
+      res.push({row:i+2,oc,on,
+        pc:ex.pcode||detectPcode(on),
+        nc:validNC?ex.newCode:'(ไม่มีรหัสใหม่)',
+        nn:ex.newName||on,
+        status:'dup', dupSrc:'db'});
+      continue;
+    }
+    // ── Priority 2: Check Excel/GSheets DB (oldLookup)
     if(oldLookup[oc]){
       const ex=oldLookup[oc];
       const validNC=ex.newCode&&ex.newCode.length===20&&ex.newCode.startsWith('G');
-      res.push({row:i+2,oc,on,pc:detectPcode(on),nc:validNC?ex.newCode:'(ไม่มีรหัสใหม่)',nn:ex.newName||on,status:'dup',dbSheet:ex.sheet});
+      res.push({row:i+2,oc,on,
+        pc:detectPcode(on),
+        nc:validNC?ex.newCode:'(ไม่มีรหัสใหม่)',
+        nn:ex.newName||on,
+        status:'dup', dupSrc:'excel'});
       continue;
     }
+    // ── Generate new code
     const pfx=parsePrefix(oc);
     if(!pfx){res.push({row:i+2,oc,on,pc:'?',nc:'ERROR: รูปแบบรหัสไม่รองรับ',nn:'-',status:'err'});continue;}
     const pc=detectPcode(on);
@@ -691,10 +831,25 @@ function doExport(){
 // ═══════════════════════════════════════════════
 //  UI
 // ═══════════════════════════════════════════════
-function showResults(){
+async function showResults(){
   document.getElementById('resSec').style.display='block';
   ['btnReset','btnWB','btnExport'].forEach(id=>{document.getElementById(id).style.display='flex';});
   activeTab=0;filterMode='all';renderAll();
+  // Auto-save only genuinely new codes (not in idbLookup)
+  const sheets=Object.keys(rawData);
+  const batchName=sheets.length>0?sheets.join(', ').slice(0,40):new Date().toLocaleDateString('th-TH');
+  try{
+    const saved=await saveResultsToHistory(batchName);
+    const total=await dbCount();
+    // Update history button badge
+    document.getElementById('btnHistory').textContent=`🗂 ประวัติ DB (${total.toLocaleString()})`;
+    if(saved>0){
+      addAlert('ok',`🗄 บันทึก ${saved} รหัสใหม่ลง Database — รวมทั้งหมด ${total.toLocaleString()} รหัส`);
+    } else {
+      const dupCnt=Object.values(allData).flat().filter(r=>r.status==='dup'&&r.dupSrc==='db').length;
+      if(dupCnt>0) addAlert('info',`ℹ️ พบ ${dupCnt} รหัสที่มีในDatabase แล้ว — ไม่บันทึกซ้ำ`);
+    }
+  }catch(e){console.warn('Auto-save failed:',e);}
 }
 function renderAll(){renderStats();renderTabs();renderTable();}
 function renderStats(){
@@ -773,7 +928,7 @@ function setDBSt(s,msg){
   document.getElementById('dbStText').textContent=msg;
 }
 function resetImport(){
-  allData={};rawData={};activeTab=0;filterMode='all';
+  allData={};rawData={};idbLookup={};activeTab=0;filterMode='all';
   document.getElementById('resSec').style.display='none';
   ['btnReset','btnWB','btnExport'].forEach(id=>{document.getElementById(id).style.display='none';});
   document.getElementById('impFile').value='';
@@ -793,6 +948,329 @@ const dz=document.getElementById('dz');
 dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');});
 dz.addEventListener('dragleave',()=>dz.classList.remove('drag'));
 dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag');const f=e.dataTransfer.files[0];if(f)loadImport({target:{files:e.dataTransfer.files}});});
+
+
+
+// ═══════════════════════════════════════════════════════════════
+//  INDEXEDDB — PERSISTENT CODE HISTORY
+//  Store: pma_history
+//  Record: { id(auto), oldCode, oldName, pcode, newCode, newName,
+//            addedAt(ISO), batchName, source }
+// ═══════════════════════════════════════════════════════════════
+const DB_NAME = 'PMACodeDB', DB_VER = 1, STORE = 'pma_history';
+let idb = null;
+
+function initDB(){
+  return new Promise((res,rej)=>{
+    if(idb){res(idb);return;}
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains(STORE)){
+        const s = db.createObjectStore(STORE,{keyPath:'id',autoIncrement:true});
+        s.createIndex('oldCode','oldCode',{unique:false});
+        s.createIndex('newCode','newCode',{unique:false});
+        s.createIndex('pcode','pcode',{unique:false});
+        s.createIndex('addedAt','addedAt',{unique:false});
+        s.createIndex('batchName','batchName',{unique:false});
+      }
+    };
+    req.onsuccess = e => {idb=e.target.result;res(idb);};
+    req.onerror = e => rej(e.target.error);
+  });
+}
+
+function dbPut(records){
+  // records = array of objects
+  return initDB().then(db => new Promise((res,rej)=>{
+    const tx = db.transaction(STORE,'readwrite');
+    const st = tx.objectStore(STORE);
+    let done=0;
+    if(!records.length){res(0);return;}
+    records.forEach(r=>{
+      const req=st.add(r);
+      req.onsuccess=()=>{done++;if(done===records.length)res(done);};
+      req.onerror=e=>{rej(e.target.error);};
+    });
+  }));
+}
+
+function dbGetAll(){
+  return initDB().then(db => new Promise((res,rej)=>{
+    const tx = db.transaction(STORE,'readonly');
+    const req = tx.objectStore(STORE).getAll();
+    req.onsuccess = e => res(e.target.result);
+    req.onerror = e => rej(e.target.error);
+  }));
+}
+
+function dbDelete(id){
+  return initDB().then(db => new Promise((res,rej)=>{
+    const tx = db.transaction(STORE,'readwrite');
+    const req = tx.objectStore(STORE).delete(id);
+    req.onsuccess = ()=>res();
+    req.onerror = e=>rej(e.target.error);
+  }));
+}
+
+function dbClear(){
+  return initDB().then(db => new Promise((res,rej)=>{
+    const tx = db.transaction(STORE,'readwrite');
+    const req = tx.objectStore(STORE).clear();
+    req.onsuccess = ()=>res();
+    req.onerror = e=>rej(e.target.error);
+  }));
+}
+
+function dbCount(){
+  return initDB().then(db => new Promise((res,rej)=>{
+    const tx = db.transaction(STORE,'readonly');
+    const req = tx.objectStore(STORE).count();
+    req.onsuccess = e=>res(e.target.result);
+    req.onerror = e=>rej(e.target.error);
+  }));
+}
+
+// Check if oldCode already in history
+function dbHasOldCode(oldCode){
+  return initDB().then(db => new Promise((res,rej)=>{
+    const tx = db.transaction(STORE,'readonly');
+    const idx = tx.objectStore(STORE).index('oldCode');
+    const req = idx.getAll(oldCode);
+    req.onsuccess = e => res(e.target.result.length > 0);
+    req.onerror = e => rej(e.target.error);
+  }));
+}
+
+// ── AUTO-SAVE after generating codes ───────────────────────────
+async function saveResultsToHistory(batchName){
+  // Only save genuinely NEW codes — skip anything already in idbLookup
+  const newRows = Object.values(allData).flat()
+    .filter(r=>(r.status==='new'||r.status==='p08') && !idbLookup[r.oc]);
+  if(!newRows.length) return 0;
+  const now = new Date().toISOString();
+  const records = newRows.map(r=>({
+    oldCode: r.oc, oldName: r.on, pcode: r.pc,
+    newCode: r.nc, newName: r.nn,
+    addedAt: now, batchName: batchName||'Import', source:'generated'
+  }));
+  try{
+    const saved = await dbPut(records);
+    // Update idbLookup in-memory so subsequent calls reflect new state
+    records.forEach(r=>{ idbLookup[r.oldCode]=r; });
+    return saved;
+  }catch(e){
+    console.warn('History save failed:',e);
+    return 0;
+  }
+}
+
+// ── SEED from loaded DB workbook ────────────────────────────────
+async function seedFromDB(){
+  if(!dbWB){addHistAlert('warn','⚠️ กรุณาโหลดไฟล์ PMA_2025 ก่อน (ในหน้าหลัก)');return;}
+  const btn=document.getElementById('btnSeed');
+  btn.disabled=true;btn.textContent='กำลังนำเข้า...';
+  showOv('กำลังนำเข้าข้อมูล PMA_2025 สู่ Database...','โปรดรอ');
+  try{
+    let total=0,skipped=0;
+    const now=new Date().toISOString();
+    const BATCH=200;
+    for(const sn of dbWB.SheetNames){
+      const rows=XLSX.utils.sheet_to_json(dbWB.Sheets[sn],{header:1,defval:''});
+      const toInsert=[];
+      for(const r of rows){
+        const oc=String(r[0]||'').trim(),on=String(r[1]||'').trim();
+        const nc=String(r[2]||'').trim(),nn=String(r[3]||'').trim();
+        if(!oc||['รหัสเก่า','','nan'].includes(oc)||oc.startsWith('PMA')) continue;
+        if(!nc||nc.length!==20||!nc.startsWith('G')) continue;
+        // Skip if oldCode already exists in DB
+        if(idbLookup[oc]){skipped++;continue;}
+        const pc=detectPcode(on);
+        const rec={oldCode:oc,oldName:on,pcode:pc,newCode:nc,newName:nn,addedAt:now,batchName:`PMA_2025:${sn}`,source:'seeded'};
+        toInsert.push(rec);
+        idbLookup[oc]=rec; // update in-memory lookup
+        total++;
+      }
+      // Insert in batches
+      for(let i=0;i<toInsert.length;i+=BATCH){
+        await dbPut(toInsert.slice(i,i+BATCH));
+      }
+    }
+    hideOv();
+    btn.disabled=false;btn.textContent='📥 นำเข้าจาก PMA_2025';
+    addHistAlert('ok',`✅ นำเข้าสำเร็จ — ${total.toLocaleString()} รายการ (ข้าม ${skipped} ซ้ำ) จาก PMA_2025`);
+    await renderHistStats();
+    renderHistory();
+  }catch(e){
+    hideOv();btn.disabled=false;btn.textContent='📥 นำเข้าจาก PMA_2025';
+    addHistAlert('err','❌ เกิดข้อผิดพลาด: '+e.message);
+  }
+}
+
+// ── HISTORY UI ──────────────────────────────────────────────────
+let histAllRecords=[], histPcodeFilter='all';
+
+async function openHistory(){
+  document.getElementById('histModal').classList.remove('hidden');
+  await renderHistStats();
+  renderHistory();
+}
+function closeHistory(){document.getElementById('histModal').classList.add('hidden');}
+
+async function renderHistStats(){
+  try{
+    const all = await dbGetAll();
+    histAllRecords = all;
+    const tot = all.length;
+    document.getElementById('histSubTitle').textContent=`${tot.toLocaleString()} รหัสทั้งหมด`;
+    // Count by pcode
+    const byP={};
+    all.forEach(r=>{byP[r.pcode]=(byP[r.pcode]||0)+1;});
+    // Today
+    const today=new Date().toISOString().slice(0,10);
+    const todayCnt=all.filter(r=>r.addedAt&&r.addedAt.startsWith(today)).length;
+    // Unique sources
+    const batches=new Set(all.map(r=>r.batchName)).size;
+    document.getElementById('histStats').innerHTML=`
+      <div class="stat"><div class="sv">${tot.toLocaleString()}</div><div class="sl">รหัสทั้งหมด</div></div>
+      <div class="stat"><div class="sv" style="color:var(--grn)">${todayCnt.toLocaleString()}</div><div class="sl">เพิ่มวันนี้</div></div>
+      <div class="stat"><div class="sv" style="color:var(--acc)">${Object.keys(byP).length}</div><div class="sl">หมวดสินค้า</div></div>
+      <div class="stat"><div class="sv" style="color:var(--pur)">${batches}</div><div class="sl">Batch/ไฟล์</div></div>
+    `;
+    // Cat filter chips
+    const cats=document.getElementById('histCats');
+    cats.innerHTML=`<button class="hcat ${histPcodeFilter==='all'?'on':''}" style="background:var(--s2);color:var(--txt)" onclick="setHistFilter('all')">ทั้งหมด (${tot.toLocaleString()})</button>`;
+    Object.entries(byP).sort((a,b)=>b[1]-a[1]).forEach(([pc,cnt])=>{
+      const c=CATS[pc]?.c||'#888';
+      cats.innerHTML+=`<button class="hcat ${histPcodeFilter===pc?'on':''}" style="background:${c}18;color:${c}" onclick="setHistFilter('${pc}')">${pc} (${cnt})</button>`;
+    });
+  }catch(e){
+    document.getElementById('histSubTitle').textContent='ไม่สามารถโหลดข้อมูลได้';
+    console.error(e);
+  }
+}
+
+function setHistFilter(pc){
+  histPcodeFilter=pc;
+  document.querySelectorAll('.hcat').forEach(b=>{
+    const isAll=b.textContent.startsWith('ทั้งหมด');
+    b.classList.toggle('on',(pc==='all'&&isAll)||(b.textContent.startsWith(pc+' ')));
+  });
+  renderHistory();
+}
+
+function renderHistory(){
+  const q=(document.getElementById('histSrch').value||'').toLowerCase();
+  const sort=document.getElementById('histSort').value;
+  let rows=[...histAllRecords];
+  if(histPcodeFilter!=='all') rows=rows.filter(r=>r.pcode===histPcodeFilter);
+  if(q) rows=rows.filter(r=>((r.oldCode||'')+(r.oldName||'')+(r.newCode||'')+(r.newName||'')).toLowerCase().includes(q));
+  // Sort
+  if(sort==='date_desc') rows.sort((a,b)=>b.addedAt?.localeCompare(a.addedAt||'')||0);
+  else if(sort==='date_asc') rows.sort((a,b)=>a.addedAt?.localeCompare(b.addedAt||'')||0);
+  else if(sort==='pcode') rows.sort((a,b)=>(a.pcode||'').localeCompare(b.pcode||''));
+  else if(sort==='newCode') rows.sort((a,b)=>(a.newCode||'').localeCompare(b.newCode||''));
+
+  const LIMIT=500;
+  const show=rows.slice(0,LIMIT);
+  document.getElementById('histRcnt').textContent=`${rows.length.toLocaleString()} รายการ`;
+
+  const tbody=document.getElementById('histTbody');
+  if(!rows.length){
+    tbody.innerHTML=`<tr><td colspan="9"><div class="hist-empty">
+      <div class="hist-empty-ico">🗄</div>
+      <div class="hist-empty-t">ยังไม่มีข้อมูลใน Database</div>
+      <div class="hist-empty-s">นำเข้าจาก PMA_2025 หรือสร้างรหัสใหม่เพื่อเริ่มบันทึก</div>
+    </div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML='';
+  show.forEach((r,i)=>{
+    const cat=CATS[r.pcode];const cc=cat?.c||'#888';
+    const dateStr=r.addedAt?r.addedAt.slice(0,10):'—';
+    const batchShort=r.batchName?r.batchName.replace('PMA_2025:','').slice(0,15):'—';
+    const ccls=r.source==='seeded'?'cc-dup':r.pcode==='P08'?'cc-p08':'cc-new';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td class="rn">${i+1}</td>
+      <td><span class="cat-chip" style="background:${cc}20;color:${cc}">${r.pcode||'?'}</span></td>
+      <td><span class="mono" style="font-size:11px;color:var(--muted)">${esc(r.oldCode||'')}</span></td>
+      <td><div class="name-col name-old" title="${esc(r.oldName||'')}">${esc(trunc(r.oldName||'',44))}</div></td>
+      <td><span class="code-chip ${ccls}">${esc(r.newCode||'')}</span></td>
+      <td><div class="name-col name-new" title="${esc(r.newName||'')}">${esc(trunc(r.newName||'',60))}</div></td>
+      <td class="date-col">${dateStr}</td>
+      <td><span class="batch-tag" title="${esc(r.batchName||'')}">${esc(batchShort)}</span></td>
+      <td><button class="del-btn" onclick="deleteHistRecord(${r.id})" title="ลบรายการนี้">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  const more=document.getElementById('histMore');
+  if(rows.length>LIMIT){more.classList.remove('hidden');more.textContent=`แสดง ${LIMIT.toLocaleString()} / ${rows.length.toLocaleString()} — Export เพื่อดูครบทั้งหมด`;}
+  else more.classList.add('hidden');
+}
+
+async function deleteHistRecord(id){
+  await dbDelete(id);
+  histAllRecords=histAllRecords.filter(r=>r.id!==id);
+  await renderHistStats();
+  renderHistory();
+}
+
+async function confirmClearHistory(){
+  const cnt=histAllRecords.length;
+  if(!cnt){addHistAlert('warn','ไม่มีข้อมูลในฐานข้อมูล');return;}
+  if(!confirm(`จะลบ ${cnt.toLocaleString()} รายการทั้งหมดออกจาก Database ถาวร\n\nดำเนินการต่อ?`)) return;
+  await dbClear();
+  histAllRecords=[];
+  await renderHistStats();
+  renderHistory();
+  addHistAlert('ok','✅ ล้าง Database เรียบร้อยแล้ว');
+}
+
+async function exportHistory(){
+  const rows=[...histAllRecords];
+  if(!rows.length){addHistAlert('warn','ไม่มีข้อมูลที่จะ Export');return;}
+  showOv('กำลัง Export ประวัติ...','');
+  setTimeout(()=>{
+    try{
+      const wb=XLSX.utils.book_new();
+      // Sheet 1: All records
+      const data=[['#','หมวด','รหัสเก่า','ชื่อเก่า','รหัสใหม่','ชื่อใหม่','วันที่เพิ่ม','Batch','Source']];
+      rows.sort((a,b)=>(a.pcode||'').localeCompare(b.pcode||'')||(a.newCode||'').localeCompare(b.newCode||''));
+      rows.forEach((r,i)=>data.push([i+1,r.pcode,r.oldCode,r.oldName,r.newCode,r.newName,r.addedAt?.slice(0,10)||'',r.batchName||'',r.source||'']));
+      const ws=XLSX.utils.aoa_to_sheet(data);
+      ws['!cols']=[{wch:5},{wch:8},{wch:22},{wch:65},{wch:22},{wch:85},{wch:12},{wch:20},{wch:10}];
+      XLSX.utils.book_append_sheet(wb,ws,'ประวัติทั้งหมด');
+      // Sheet 2: Summary by pcode
+      const byP={};rows.forEach(r=>{if(!byP[r.pcode])byP[r.pcode]=[];byP[r.pcode].push(r);});
+      const sumData=[['หมวด','ชื่อหมวด','จำนวน']];
+      Object.entries(byP).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([pc,rs])=>sumData.push([pc,CATS[pc]?.en||'',rs.length]));
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(sumData),'สรุปหมวดสินค้า');
+      const d=new Date(),stamp=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+      XLSX.writeFile(wb,`PMA_History_${stamp}.xlsx`);
+      hideOv();
+    }catch(e){hideOv();alert('Export ไม่สำเร็จ: '+e.message);}
+  },80);
+}
+
+function addHistAlert(type,msg){
+  const el=document.getElementById('histAlertArea');if(!el)return;
+  const d=document.createElement('div');d.className=`alert al-${type}`;d.innerHTML=msg;
+  el.prepend(d);setTimeout(()=>d.remove&&d.remove(),8000);
+}
+
+// Auto-save is now built into showResults() directly
+
+// Init DB on page load — pre-load idbLookup and update badge
+initDB().then(async ()=>{
+  try{
+    const records = await dbGetAll();
+    records.forEach(r=>{ if(r.oldCode) idbLookup[r.oldCode]=r; });
+    if(records.length>0){
+      document.getElementById('btnHistory').textContent=`🗂 ประวัติ DB (${records.length.toLocaleString()})`;
+    }
+  }catch(e){console.warn('DB preload failed:',e);}
+}).catch(e=>console.warn('IndexedDB init failed:',e));
 
 // CLOSE modal on bg click
 document.getElementById('wbModal').addEventListener('click',function(e){if(e.target===this)closeWBModal();});
