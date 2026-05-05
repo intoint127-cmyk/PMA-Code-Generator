@@ -1027,26 +1027,35 @@ function setGasUrl(url){
   _gasCache = null;
 }
 
-// ── GAS fetch helper ────────────────────────────────────────────
+// ── GAS fetch helper ─────────────────────────────────────────────
+// Apps Script มี CORS issue กับ POST จาก GitHub Pages (HTTPS)
+// แก้โดยส่งทุก request เป็น GET + encode payload เป็น query string
 async function gasGet(params={}){
   if(!GAS_URL) throw new Error('ยังไม่ได้ตั้งค่า Apps Script URL');
   const qs = new URLSearchParams(params).toString();
-  const res = await fetch(`${GAS_URL}?${qs}`);
-  const json = await res.json();
-  if(!json.ok) throw new Error(json.error||'GAS error');
-  return json;
+  const res = await fetch(`${GAS_URL}?${qs}`, {redirect:'follow'});
+  const text = await res.text();
+  try{
+    const json = JSON.parse(text);
+    if(!json.ok) throw new Error(json.error||'GAS error');
+    return json;
+  }catch(e){ throw new Error('GAS response error: '+text.slice(0,100)); }
 }
 
+// POST → encode as GET with action + payload parameter
 async function gasPost(body){
   if(!GAS_URL) throw new Error('ยังไม่ได้ตั้งค่า Apps Script URL');
-  const res = await fetch(GAS_URL, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(body)
+  const params = new URLSearchParams({
+    action: body.action,
+    payload: JSON.stringify(body)
   });
-  const json = await res.json();
-  if(!json.ok) throw new Error(json.error||'GAS error');
-  return json;
+  const res = await fetch(`${GAS_URL}?${params}`, {redirect:'follow'});
+  const text = await res.text();
+  try{
+    const json = JSON.parse(text);
+    if(!json.ok) throw new Error(json.error||'GAS error');
+    return json;
+  }catch(e){ throw new Error('GAS response error: '+text.slice(0,100)); }
 }
 
 // ── PUBLIC API — same signatures as old IndexedDB functions ────
