@@ -198,6 +198,7 @@ tr:hover td{background:rgba(91,141,238,.035);}
       <div class="hist-sub" id="histSubTitle">โหลดข้อมูล...</div>
     </div>
     <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button class="btn btn-ghost btn-sm" onclick="refreshCloudDB()">🔄 Refresh</button>
       <button class="btn btn-ghost btn-sm" onclick="seedFromDB()" id="btnSeed">📥 นำเข้าจาก PMA_2025</button>
       <button class="btn btn-o btn-sm" onclick="exportHistory()">⬇ Export ประวัติ</button>
       <button class="btn btn-ghost btn-sm" onclick="confirmClearHistory()" style="color:var(--red)">🗑 ล้างประวัติ</button>
@@ -372,6 +373,24 @@ tr:hover td{background:rgba(91,141,238,.035);}
           🔗 วิธีได้ลิงก์: เปิดไฟล์ใน SharePoint → ⋯ More → Copy link<br>
           หรือเปิดไฟล์ → URL ใน Browser → เพิ่ม <strong>?download=1</strong> ที่ท้าย URL<br>
           ⚠️ ต้องเป็นลิงก์ที่ "Anyone with link" เข้าถึงได้
+        </div>
+      </div>
+
+      <!-- GAS DB CONFIG -->
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--brd)">
+        <div class="panel-hdr" style="margin-bottom:8px">☁ Cloud Database (แชร์ทุกคน)</div>
+        <div class="db-st" id="gasSt" style="margin-bottom:8px">
+          <div class="sdot" id="gasDot" style="background:var(--dim)"></div>
+          <span id="gasStText">ยังไม่ได้ตั้งค่า Apps Script URL</span>
+        </div>
+        <div class="inp-row">
+          <input type="text" id="gasUrlInput" placeholder="https://script.google.com/macros/s/.../exec" style="font-size:11px">
+          <button class="btn btn-p btn-sm" onclick="saveGasUrl()">บันทึก</button>
+        </div>
+        <div class="hint">
+          📋 วาง URL จาก <strong>ngrok</strong> หรือ <strong>Google Apps Script</strong><br>
+          ตัวอย่าง ngrok: <code>https://xxxx.ngrok-free.app</code><br>
+          💾 URL จะถูกจำไว้ในเครื่องนี้ ไม่ต้องกรอกใหม่ทุกครั้ง
         </div>
       </div>
     </div>
@@ -923,6 +942,44 @@ function switchSrc(t){
   ['file','gsheets','sp'].forEach(x=>{document.getElementById(`src-${x}`)?.classList.toggle('hidden',x!==t);});
   document.querySelectorAll('.src-tab').forEach((b,i)=>b.classList.toggle('on',['file','gsheets','sp'][i]===t));
 }
+
+// ── GAS URL Config ──────────────────────────────────────────────
+async function saveGasUrl(){
+  const url = document.getElementById('gasUrlInput').value.trim();
+  if(!url){alert('กรุณากรอก URL');return;}
+  if(!url.startsWith('https://')){
+    if(!confirm('URL ต้องเป็น HTTPS ต้องการใช้งานต่อไหม?')) return;
+  }
+  setGasUrl(url);
+  updateGasSt('wait','กำลังทดสอบการเชื่อมต่อ...');
+  try{
+    const data = await gasGet({action:'count'});
+    updateGasSt('ok',`✅ เชื่อมต่อสำเร็จ — มีข้อมูล ${(data.count||0).toLocaleString()} รหัสใน Cloud DB`);
+    addAlert('ok',`✅ เชื่อมต่อ Cloud Database แล้ว — ${(data.count||0).toLocaleString()} รหัส`);
+    // Reload idbLookup from cloud
+    showOv('กำลังโหลดข้อมูลจาก Cloud DB...','');
+    const records = await dbGetAll();
+    idbLookup = {};
+    records.forEach(r=>{ if(r.oldCode) idbLookup[r.oldCode]=r; });
+    hideOv();
+    document.getElementById('btnHistory').textContent=`🗂 ประวัติ DB (${records.length.toLocaleString()})`;
+    if(Object.keys(rawData).length>0) await reprocess().then(()=>renderAll());
+  }catch(e){
+    updateGasSt('err','❌ เชื่อมต่อไม่ได้: '+e.message);
+    addAlert('err','❌ ไม่สามารถเชื่อมต่อ Cloud DB ได้: '+e.message);
+  }
+}
+
+function updateGasSt(s,msg){
+  const dot=document.getElementById('gasDot');
+  const txt=document.getElementById('gasStText');
+  if(!dot||!txt)return;
+  if(s==='ok'){dot.style.background='var(--grn)';dot.style.boxShadow='0 0 6px var(--grn)';}
+  else if(s==='wait'){dot.style.background='var(--org)';dot.style.animation='blink 1.2s infinite';}
+  else if(s==='err'){dot.style.background='var(--red)';dot.style.animation='';}
+  else{dot.style.background='var(--dim)';dot.style.animation='';}
+  txt.textContent=msg;
+}
 function setDBSt(s,msg){
   document.getElementById('dbDot').className='sdot sdot-'+(s==='ok'?'ok':s==='wait'?'wait':'err');
   document.getElementById('dbStText').textContent=msg;
@@ -952,94 +1009,89 @@ dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag');co
 
 
 // ═══════════════════════════════════════════════════════════════
-//  INDEXEDDB — PERSISTENT CODE HISTORY
-//  Store: pma_history
-//  Record: { id(auto), oldCode, oldName, pcode, newCode, newName,
-//            addedAt(ISO), batchName, source }
+//  GOOGLE SHEETS DATABASE API
+//  ข้อมูลแชร์กันทุกคน — เก็บใน Google Sheets ผ่าน Apps Script
 // ═══════════════════════════════════════════════════════════════
-const DB_NAME = 'PMACodeDB', DB_VER = 1, STORE = 'pma_history';
-let idb = null;
+let GAS_URL = '';
+try{GAS_URL=localStorage.getItem('pma_gas_url')||'';}catch(e){}
+// Cache in-memory เพื่อลด API calls
+let _gasCache = null;   // {records:[], stdC:{}, p08C:{}, loadedAt:0}
+const CACHE_TTL = 60000; // 60 วินาที
 
-function initDB(){
-  return new Promise((res,rej)=>{
-    if(idb){res(idb);return;}
-    const req = indexedDB.open(DB_NAME, DB_VER);
-    req.onupgradeneeded = e => {
-      const db = e.target.result;
-      if(!db.objectStoreNames.contains(STORE)){
-        const s = db.createObjectStore(STORE,{keyPath:'id',autoIncrement:true});
-        s.createIndex('oldCode','oldCode',{unique:false});
-        s.createIndex('newCode','newCode',{unique:false});
-        s.createIndex('pcode','pcode',{unique:false});
-        s.createIndex('addedAt','addedAt',{unique:false});
-        s.createIndex('batchName','batchName',{unique:false});
-      }
-    };
-    req.onsuccess = e => {idb=e.target.result;res(idb);};
-    req.onerror = e => rej(e.target.error);
+function gasConfigured(){ return !!GAS_URL; }
+
+// ── ตั้งค่า GAS URL (เก็บใน localStorage ของแต่ละเครื่อง) ─────
+function setGasUrl(url){
+  GAS_URL = url.trim();
+  try{localStorage.setItem('pma_gas_url',GAS_URL);}catch(e){}
+  _gasCache = null;
+}
+
+// ── GAS fetch helper ────────────────────────────────────────────
+async function gasGet(params={}){
+  if(!GAS_URL) throw new Error('ยังไม่ได้ตั้งค่า Apps Script URL');
+  const qs = new URLSearchParams(params).toString();
+  const res = await fetch(`${GAS_URL}?${qs}`);
+  const json = await res.json();
+  if(!json.ok) throw new Error(json.error||'GAS error');
+  return json;
+}
+
+async function gasPost(body){
+  if(!GAS_URL) throw new Error('ยังไม่ได้ตั้งค่า Apps Script URL');
+  const res = await fetch(GAS_URL, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
   });
+  const json = await res.json();
+  if(!json.ok) throw new Error(json.error||'GAS error');
+  return json;
 }
 
-function dbPut(records){
-  // records = array of objects
-  return initDB().then(db => new Promise((res,rej)=>{
-    const tx = db.transaction(STORE,'readwrite');
-    const st = tx.objectStore(STORE);
-    let done=0;
-    if(!records.length){res(0);return;}
-    records.forEach(r=>{
-      const req=st.add(r);
-      req.onsuccess=()=>{done++;if(done===records.length)res(done);};
-      req.onerror=e=>{rej(e.target.error);};
-    });
-  }));
+// ── PUBLIC API — same signatures as old IndexedDB functions ────
+async function initDB(){ return true; } // no-op, GAS is always ready
+
+async function dbGetAll(){
+  if(_gasCache && (Date.now()-_gasCache.loadedAt < CACHE_TTL)){
+    return _gasCache.records;
+  }
+  if(!GAS_URL) return [];
+  const data = await gasGet({action:'all'});
+  _gasCache = {
+    records: data.records||[],
+    loadedAt: Date.now()
+  };
+  return _gasCache.records;
 }
 
-function dbGetAll(){
-  return initDB().then(db => new Promise((res,rej)=>{
-    const tx = db.transaction(STORE,'readonly');
-    const req = tx.objectStore(STORE).getAll();
-    req.onsuccess = e => res(e.target.result);
-    req.onerror = e => rej(e.target.error);
-  }));
+async function dbPut(records){
+  if(!GAS_URL) return 0;
+  const data = await gasPost({action:'insert', records});
+  _gasCache = null; // invalidate cache
+  return data.inserted || 0;
 }
 
-function dbDelete(id){
-  return initDB().then(db => new Promise((res,rej)=>{
-    const tx = db.transaction(STORE,'readwrite');
-    const req = tx.objectStore(STORE).delete(id);
-    req.onsuccess = ()=>res();
-    req.onerror = e=>rej(e.target.error);
-  }));
+async function dbDelete(id){
+  if(!GAS_URL) return;
+  await gasPost({action:'delete', id});
+  _gasCache = null;
 }
 
-function dbClear(){
-  return initDB().then(db => new Promise((res,rej)=>{
-    const tx = db.transaction(STORE,'readwrite');
-    const req = tx.objectStore(STORE).clear();
-    req.onsuccess = ()=>res();
-    req.onerror = e=>rej(e.target.error);
-  }));
+async function dbClear(){
+  if(!GAS_URL) return;
+  await gasPost({action:'clear'});
+  _gasCache = null;
 }
 
-function dbCount(){
-  return initDB().then(db => new Promise((res,rej)=>{
-    const tx = db.transaction(STORE,'readonly');
-    const req = tx.objectStore(STORE).count();
-    req.onsuccess = e=>res(e.target.result);
-    req.onerror = e=>rej(e.target.error);
-  }));
-}
-
-// Check if oldCode already in history
-function dbHasOldCode(oldCode){
-  return initDB().then(db => new Promise((res,rej)=>{
-    const tx = db.transaction(STORE,'readonly');
-    const idx = tx.objectStore(STORE).index('oldCode');
-    const req = idx.getAll(oldCode);
-    req.onsuccess = e => res(e.target.result.length > 0);
-    req.onerror = e => rej(e.target.error);
-  }));
+async function dbCount(){
+  if(!GAS_URL){
+    // fallback: count from idbLookup
+    return Object.keys(idbLookup).length;
+  }
+  if(_gasCache) return _gasCache.records.length;
+  const data = await gasGet({action:'count'});
+  return data.count || 0;
 }
 
 // ── AUTO-SAVE after generating codes ───────────────────────────
@@ -1112,8 +1164,32 @@ let histAllRecords=[], histPcodeFilter='all';
 
 async function openHistory(){
   document.getElementById('histModal').classList.remove('hidden');
+  // Always refresh from cloud when opening
+  if(gasConfigured()){
+    _gasCache = null; // force fresh fetch
+    const records = await dbGetAll().catch(()=>[]);
+    idbLookup={};
+    records.forEach(r=>{ if(r.oldCode) idbLookup[r.oldCode]=r; });
+  }
   await renderHistStats();
   renderHistory();
+}
+
+async function refreshCloudDB(){
+  if(!gasConfigured()){addHistAlert('warn','⚠️ ยังไม่ได้ตั้งค่า Apps Script URL');return;}
+  _gasCache=null;
+  addHistAlert('info','🔄 กำลังโหลดข้อมูลจาก Cloud...');
+  try{
+    const records = await dbGetAll();
+    idbLookup={};
+    records.forEach(r=>{ if(r.oldCode) idbLookup[r.oldCode]=r; });
+    document.getElementById('btnHistory').textContent=`🗂 ประวัติ DB (${records.length.toLocaleString()})`;
+    await renderHistStats();
+    renderHistory();
+    addHistAlert('ok',`✅ โหลดแล้ว — ${records.length.toLocaleString()} รหัส`);
+  }catch(e){
+    addHistAlert('err','❌ โหลดไม่ได้: '+e.message);
+  }
 }
 function closeHistory(){document.getElementById('histModal').classList.add('hidden');}
 
@@ -1210,10 +1286,14 @@ function renderHistory(){
 }
 
 async function deleteHistRecord(id){
-  await dbDelete(id);
-  histAllRecords=histAllRecords.filter(r=>r.id!==id);
-  await renderHistStats();
-  renderHistory();
+  try{
+    await dbDelete(id);
+    histAllRecords=histAllRecords.filter(r=>String(r.id)!==String(id));
+    // Also remove from idbLookup
+    Object.keys(idbLookup).forEach(k=>{ if(String(idbLookup[k].id)===String(id)) delete idbLookup[k]; });
+    await renderHistStats();
+    renderHistory();
+  }catch(e){addHistAlert('err','❌ ลบไม่สำเร็จ: '+e.message);}
 }
 
 async function confirmClearHistory(){
@@ -1261,16 +1341,32 @@ function addHistAlert(type,msg){
 
 // Auto-save is now built into showResults() directly
 
-// Init DB on page load — pre-load idbLookup and update badge
-initDB().then(async ()=>{
-  try{
-    const records = await dbGetAll();
-    records.forEach(r=>{ if(r.oldCode) idbLookup[r.oldCode]=r; });
-    if(records.length>0){
+// Init — connect to Cloud DB if URL is saved
+(async function(){
+  // Restore saved URL into input field
+  if(GAS_URL){
+    const inp=document.getElementById('gasUrlInput');
+    if(inp) inp.value=GAS_URL;
+    updateGasSt('wait','กำลังเชื่อมต่อ Cloud Database...');
+    try{
+      const data = await gasGet({action:'count'});
+      updateGasSt('ok',`✅ Cloud DB พร้อม — ${(data.count||0).toLocaleString()} รหัส`);
+      // Pre-load all records into idbLookup
+      showOv('กำลังโหลด Cloud Database...','โปรดรอสักครู่');
+      const records = await dbGetAll();
+      idbLookup={};
+      records.forEach(r=>{ if(r.oldCode) idbLookup[r.oldCode]=r; });
+      hideOv();
       document.getElementById('btnHistory').textContent=`🗂 ประวัติ DB (${records.length.toLocaleString()})`;
+    }catch(e){
+      hideOv();
+      updateGasSt('err','⚠️ เชื่อมต่อไม่ได้ — กรุณาตรวจสอบ URL');
+      console.warn('Cloud DB connect failed:',e);
     }
-  }catch(e){console.warn('DB preload failed:',e);}
-}).catch(e=>console.warn('IndexedDB init failed:',e));
+  } else {
+    updateGasSt('none','ยังไม่ได้ตั้งค่า — กรอก Apps Script URL ด้านบน');
+  }
+})();
 
 // CLOSE modal on bg click
 document.getElementById('wbModal').addEventListener('click',function(e){if(e.target===this)closeWBModal();});
